@@ -174,7 +174,7 @@ Write-Host "  Remote Desktop dang mo..." -ForegroundColor White
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  LUU Y: KHONG TAT CUA SO NAY TRONG KHI REMOTE!" -ForegroundColor Red
-Write-Host "  Khi xong, dong cua so nay de ngat ket noi." -ForegroundColor Gray
+Write-Host "  ---> Tool create by TangTuanLab <----" -ForegroundColor Gray
 Write-Host ""
 
 # Mo dung app Remote Desktop Connection de user tu nhap tay
