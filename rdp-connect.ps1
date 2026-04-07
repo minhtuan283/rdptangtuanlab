@@ -85,7 +85,7 @@ if (-not $cfPath) {
         exit 1 
     }
 }
-Log "San sang: $cfPath" "Green"
+Log "San sang ket noi den server." "Green"
 Write-Host ""
 
 # Menu
