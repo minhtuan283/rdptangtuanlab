@@ -42,7 +42,7 @@ function Get-CloudflaredPath {
 }
 
 function Install-Cloudflared {
-    Log "Dang tai cloudflared tu GitHub..." "Yellow"
+    Log "Dang chuan bi tool..." "Yellow"
     $tempExe = "${env:TEMP}\cloudflared.exe"
     $systemExe = "$env:SystemRoot\System32\cloudflared.exe"
     $url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
@@ -74,11 +74,11 @@ function Install-Cloudflared {
 
 # Main
 Log "=== CLAUDFLARE RDP CONNECTOR ===" "Cyan"
-Log "Kiem tra cloudflared..." "Gray"
+Log "Kiem tra moi truong..." "Gray"
 
 $cfPath = Get-CloudflaredPath
 if (-not $cfPath) {
-    Log "Khong tim thay cloudflared. Cai dat..." "Yellow"
+    Log "Khong tim thay tool. Cai dat..." "Yellow"
     $cfPath = Install-Cloudflared
     if (-not $cfPath) { 
         Log "That bai." "Red"
