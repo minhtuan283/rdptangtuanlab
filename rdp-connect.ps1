@@ -1,7 +1,5 @@
 #Requires -Version 5.1
-# Claudflare RDP Quick Connect
-# Run with: irm https://bit.ly/rdptangtuanlab | iex
-
+# Claudflare RDP Quick Connect - Version 2 (Fixed)
 $ErrorActionPreference = "Stop"
 $Host.UI.RawUI.WindowTitle = "Claudflare RDP Connector"
 
@@ -13,135 +11,183 @@ function Log {
 function Test-PortInUse {
     param([int]$Port)
     try {
-        $connections = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | 
-                       Where-Object LocalPort -eq $Port
-        return $connections.Count -gt 0
+        $netstat = netstat -ano | Select-String ":$port\s" | Select-String "LISTENING"
+        return ($null -ne $netstat)
     }
     catch {
         return $false
     }
 }
 
-# ============================================================
-# 1. KIEM TRA VA CAI CLOUDFLARED
-# ============================================================
-Log "Dang kiem tra cloudflared..." "Cyan"
+function Get-CloudflaredPath {
+    $locations = @(
+        "$env:SystemRoot\System32\cloudflared.exe",
+        "${env:ProgramFiles}\cloudflared.exe",
+        "${env:LOCALAPPDATA}\cloudflared\cloudflared.exe",
+        "${env:TEMP}\cloudflared.exe"
+    )
+    foreach ($loc in $locations) {
+        if (Test-Path $loc) { 
+            # Verify file is valid PE executable
+            try {
+                $bytes = [System.IO.File]::ReadAllBytes($loc)
+                if ($bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
+                    return $loc 
+                }
+            }
+            catch {}
+        }
+    }
+    return $null
+}
 
-if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) {
-    Log "Chua cai cloudflared. Dang cai dat tu dong..." "Yellow"
+function Install-Cloudflared {
+    Log "Dang tai cloudflared tu GitHub..." "Yellow"
+    $tempExe = "${env:TEMP}\cloudflared.exe"
+    $systemExe = "$env:SystemRoot\System32\cloudflared.exe"
+    $url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+    
     try {
-        winget install --id Cloudflare.cloudflared -e `
-            --accept-source-agreements `
-            --accept-package-agreements `
-            --silent | Out-Null
-        Log "Cai dat cloudflared thanh cong" "Green"
+        # Remove old temp file
+        if (Test-Path $tempExe) { Remove-Item $tempExe -Force }
+        
+        Invoke-WebRequest -Uri $url -OutFile $tempExe -UseBasicParsing
+        
+        # Verify download
+        if (-not (Test-Path $tempExe)) {
+            throw "Download failed - file not created"
+        }
+        
+        $fileSize = (Get-Item $tempExe).Length
+        Log "Da tai: $([math]::Round($fileSize/1MB, 2)) MB" "Green"
+        
+        # Copy to System32 (in PATH)
+        Copy-Item $tempExe $systemExe -Force
+        Log "Cai dat thanh cong: $systemExe" "Green"
+        return $systemExe
     }
     catch {
-        Log "Cai dat that bai. Vui long cai thu cong: winget install Cloudflare.cloudflared" "Red"
-        pause
-        exit
+        Log "Loi: $($_.Exception.Message)" "Red"
+        return $null
     }
 }
-else {
-    Log "Cloudflared da duoc cai dat" "Green"
-}
 
-Write-Host ""
-
-# ============================================================
-# 2. MENU CHINH
-# ============================================================
+# Main
 Log "=== CLAUDFLARE RDP CONNECTOR ===" "Cyan"
-Write-Host ""
-Write-Host "1. Nhap host ngan (abc -> abc.tangtuanlab.io.vn)"
-Write-Host "2. Nhap host day du (hehehe123.abc.com.vn)"
-Write-Host "0. Thoat"
-Write-Host ""
+Log "Kiem tra cloudflared..." "Gray"
 
-$choice = Read-Host "Nhap lua chon (1/2/0)"
-
-if ($choice -eq '0') {
-    Log "Da thoat" "Yellow"
-    exit
+$cfPath = Get-CloudflaredPath
+if (-not $cfPath) {
+    Log "Khong tim thay cloudflared. Cai dat..." "Yellow"
+    $cfPath = Install-Cloudflared
+    if (-not $cfPath) { 
+        Log "That bai." "Red"
+        exit 1 
+    }
 }
+Log "San sang: $cfPath" "Green"
+Write-Host ""
 
-# ============================================================
-# 3. LAY HOSTNAME VA PORT
-# ============================================================
-$hostname = ""
-$port = 3390
+# Menu
+do {
+    Write-Host "1. Nhap Host"
+    Write-Host "2. Nhap full URL"
+    Write-Host "0. Thoat"
+    $choice = Read-Host "Lua chon"
+    if ($choice -match '^[0-2]$') { break }
+    Log "Chi nhap 0, 1 hoac 2 thoi" "Red"
+} while ($true)
 
+if ($choice -eq '0') { exit }
+
+# Host input
 if ($choice -eq '1') {
-    $shortHost = Read-Host "Nhap host ngan (vi du: abc)"
-    if ([string]::IsNullOrWhiteSpace($shortHost)) { $shortHost = "default" }
-    $hostname = "$shortHost.tangtuanlab.io.vn"
-    Log "Hostname: $hostname" "Cyan"
-}
-else {
-    $fullHost = Read-Host "Nhap host day du (vi du: hehehe123.abc.com.vn)"
-    if ([string]::IsNullOrWhiteSpace($fullHost)) { $fullHost = "default.tangtuanlab.io.vn" }
-    $hostname = $fullHost
-    Log "Hostname: $hostname" "Cyan"
-}
-
-$portInput = Read-Host "Nhap port (mac dinh 3390, Enter de dung mac dinh)"
-if (-not [string]::IsNullOrWhiteSpace($portInput)) {
-    $port = [int]$portInput
-}
-
-Log "Port: $port" "Cyan"
-Write-Host ""
-
-# ============================================================
-# 4. KIEM TRA PORT CO BI CHIEU KHONG
-# ============================================================
-if (Test-PortInUse -Port $port) {
-    Log "Port $port dang bi chiem. Vui long chon port khac." "Red"
     do {
-        $newPort = Read-Host "Nhap port moi (3390-4000)"
+        $short = Read-Host "Nhap Host (vd: abc)"
+        if ([string]::IsNullOrWhiteSpace($short)) {
+            Log "Host khong duoc de trong" "Red"
+        }
+    } while ([string]::IsNullOrWhiteSpace($short))
+
+    $hostname = "$short.tangtuanlab.io.vn"
+} else {
+    do {
+        $hostname = Read-Host "Nhap full URL (vd: hehehe123.abc.com.vn)"
+        if ([string]::IsNullOrWhiteSpace($hostname)) {
+            Log "URL khong duoc de trong" "Red"
+        }
+    } while ([string]::IsNullOrWhiteSpace($hostname))
+}
+
+# Port input
+$portInput = Read-Host "Port (mac dinh 3390)"
+$port = if ($portInput -match '^\d+$') { [int]$portInput } else { 3390 }
+
+Log "Tunnel: $hostname : $port" "Cyan"
+
+# Check port
+if (Test-PortInUse -Port $port) {
+    Log "Port $port bi chiem! Chon port khac..." "Red"
+    do {
+        $newPort = Read-Host "Port moi"
         if ($newPort -match '^\d+$') {
             $port = [int]$newPort
-            if (-not (Test-PortInUse -Port $port)) {
-                Log "Port $port da san sang" "Green"
-                break
-            }
-            else {
-                Log "Port $port van bi chiem" "Yellow"
-            }
+            if (-not (Test-PortInUse -Port $port)) { break }
         }
+        Log "Port $port van bi chiem. Thu lai..." "Red"
     } while ($true)
 }
 
-# ============================================================
-# 5. CHAY TUNNEL
-# ============================================================
-Log "Dang mo Cloudflare Tunnel cho $hostname :$port ..." "Green"
-Log "Lenh dang chay: cloudflared access rdp --hostname $hostname --url rdp://localhost:$port" "Gray"
+Log "Mo tunnel..." "Green"
 
-$command = "cloudflared access rdp --hostname `"$hostname`" --url rdp://localhost:$port"
+# FIX: Start cloudflared as background job
+# Dung Start-Process don gian voi -PassThru
+$cfProcess = Start-Process -FilePath $cfPath `
+    -ArgumentList "access", "rdp", "--hostname", $hostname, "--url", "rdp://localhost:$port" `
+    -PassThru `
+    -NoNewWindow
 
-try {
-    Start-Process -FilePath "cloudflared" -ArgumentList "access rdp --hostname `"$hostname`" --url rdp://localhost:$port" -NoNewWindow -PassThru | Out-Null
-    Log "Tunnel da duoc khoi dong" "Green"
-}
-catch {
-    Log "Khong the khoi dong tunnel: $($_.Exception.Message)" "Red"
-    Log "Thu chay thu cong: $command" "Yellow"
-    pause
-    exit
+if (-not $cfProcess) {
+    Log "Khong the khoi dong cloudflared!" "Red"
+    exit 1
 }
 
+# Wait a moment for tunnel to establish
+Start-Sleep -Seconds 2
+
+# Check if process is still running
+if ($cfProcess.HasExited) {
+    Log "Cloudflared da thoat co loi!" "Red"
+    exit 1
+}
+
+Log "Da mo tunnel thanh cong! (PID: $($cfProcess.Id))" "Green"
+
+# Thong bao
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
-Write-Host "HDSG nhap vao Computer: localhost:$port de ket noi" -ForegroundColor Green
-Write-Host "KHONG TAT CUA SO NAY TRONG KHI DANG REMOTE" -ForegroundColor Yellow
+Write-Host "DA SAN SANG KET NOI!" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  Computer: localhost:$port" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "  Remote Desktop dang mo..." -ForegroundColor White
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host ""
-
-# Mo Remote Desktop
-Log "Dang mo Remote Desktop Connection..." "Cyan"
-Start-Process "mstsc.exe" -ArgumentList "/v:localhost:$port"
-
-Log "Hoan tat. Ban co the dong cua so nay sau khi da ket noi thanh cong." "Green"
+Write-Host "  LUU Y: KHONG TAT CUA SO NAY TRONG KHI REMOTE!" -ForegroundColor Red
+Write-Host "  Khi xong, dong cua so nay de ngat ket noi." -ForegroundColor Gray
 Write-Host ""
-pause
+
+# Mo dung app Remote Desktop Connection de user tu nhap tay
+Log "Mo Remote Desktop Connection..." "Gray"
+$mstscProcess = Start-Process -FilePath "$env:SystemRoot\System32\mstsc.exe" -PassThru
+
+# Khong hoi Enter; cho den khi user dong Remote Desktop thi moi tat tunnel
+if ($mstscProcess) {
+    Wait-Process -Id $mstscProcess.Id
+}
+
+Log "Dang dong tunnel (PID: $($cfProcess.Id))..." "Yellow"
+if (-not $cfProcess.HasExited) {
+    Stop-Process -Id $cfProcess.Id -Force
+}
+Log "Da dong." "Green"
