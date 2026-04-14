@@ -318,13 +318,22 @@ try {
     
 } finally {
     # Luon chay khi script ket thuc (Ctrl+C, tat window, loi...)
-    if (-not $script:isExiting) {
-        $sshService = Get-Service sshd -ErrorAction SilentlyContinue
-        if ($sshService -and $sshService.Status -eq "Running") {
-            Write-Host ""
-            Log "Phat hien cua so bi dong/tat - Tu dong tat SSH Server..." "Yellow"
-            Stop-Service sshd -ErrorAction SilentlyContinue
-            Log "Da tat SSH Server" "Green"
-        }
+    Write-Host ""
+    Log "Dang cleanup..." "Yellow"
+    
+    # Tat SSH Server
+    $sshService = Get-Service sshd -ErrorAction SilentlyContinue
+    if ($sshService -and $sshService.Status -eq "Running") {
+        Stop-Service sshd -ErrorAction SilentlyContinue
+        Log "Da tat SSH Server" "Green"
     }
+    
+    # Xoa SSH config
+    $configFile = "$env:USERPROFILE\.ssh\config"
+    if (Test-Path $configFile) {
+        Remove-Item $configFile -Force -ErrorAction SilentlyContinue
+        Log "Da xoa SSH config" "Green"
+    }
+    
+    Log "Cleanup hoan tat" "Green"
 }
