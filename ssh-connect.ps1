@@ -207,23 +207,6 @@ Host $Hostname
         Add-Content -Path $configFile -Value $configEntry -Encoding ASCII
         Log "Da them $Hostname vao SSH config" "Green"
     }
-    
-    # Fix permission
-    try {
-        icacls $sshDir /reset | Out-Null
-        icacls $sshDir /inheritance:r | Out-Null
-        icacls $sshDir /grant:r "${env:USERNAME}:RX" | Out-Null
-        
-        if (Test-Path $configFile) {
-            icacls $configFile /reset | Out-Null
-            icacls $configFile /inheritance:r | Out-Null
-            icacls $configFile /grant:r "${env:USERNAME}:R" | Out-Null
-        }
-        Log "Da fix permission cho .ssh" "Green"
-    }
-    catch {
-        Log "Canh bao: Khong the fix permission" "Yellow"
-    }
 }
 
 # Main
@@ -315,6 +298,37 @@ Write-Host "  User    : $username" -ForegroundColor Yellow
 Write-Host "  Port    : $port (reverse tunnel)" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
+Write-Host ""
+Log "Kiem tra ket noi..." "Gray"
+
+# Kiem tra host co reachable khong
+try {
+    $dns = [System.Net.Dns]::GetHostAddresses($hostname)
+    if ($dns.Count -gt 0) {
+        Log "DNS resolved: $($dns[0].ToString())" "Green"
+    }
+} catch {
+    Log "WARN: Khong the phan giai DNS cua $hostname" "Yellow"
+}
+
+# Kiem tra SSH config da co chua
+$configFile = "$env:USERPROFILE\.ssh\config"
+$configOk = $false
+if (Test-Path $configFile) {
+    $content = Get-Content $configFile -Raw -ErrorAction SilentlyContinue
+    if ($content -and $content -match "Host\s+$([regex]::Escape($hostname))") {
+        if ($content -match "ProxyCommand") {
+            $configOk = $true
+            Log "SSH config OK - ProxyCommand ton tai" "Green"
+        }
+    }
+}
+
+if (-not $configOk) {
+    Log "WARN: SSH config chua co ProxyCommand cho $hostname" "Yellow"
+    Log "Vui long kiem tra lai Cloudflare Tunnel" "Yellow"
+}
+
 Write-Host ""
 Log "Dang ket noi SSH..." "Green"
 Write-Host ""
