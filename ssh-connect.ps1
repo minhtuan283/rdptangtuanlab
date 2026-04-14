@@ -1,7 +1,7 @@
 #Requires -Version 5.1
-# Agent SSH Quick Connect - Cloudflare Tunnel
+# Mark6 SSH Quick Connect - Cloudflare Tunnel
 $ErrorActionPreference = "Stop"
-$Host.UI.RawUI.WindowTitle = "Mark6 SSH Connector"
+$Host.UI.RawUI.WindowTitle = "Agent SSH Connector"
 
 function Log {
     param([string]$Message, [string]$Color = "White")
@@ -93,25 +93,57 @@ function Install-SSHServer {
         }
     }
     
-    # Chua cai dat, tien hanh cai
-    Log "SSH Server chua duoc cai dat. Dang cai dat..." "Yellow"
+    # Chua cai dat, tai va cai tu GitHub Win32-OpenSSH
+    Log "SSH Server chua duoc cai dat. Tai OpenSSH tu GitHub..." "Yellow"
+    
+    $tempZip = "${env:TEMP}\OpenSSH-Win64.zip"
+    $installDir = "${env:ProgramFiles}\OpenSSH"
+    $url = "https://github.com/PowerShell/Win32-OpenSSH/releases/latest/download/OpenSSH-Win64.zip"
     
     try {
-        $capability = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
+        # Xoa file cu neu co
+        if (Test-Path $tempZip) { Remove-Item $tempZip -Force }
+        if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
         
-        if ($capability.State -eq "Installed") {
-            Log "OpenSSH Server da cai nhung service chua chay" "Yellow"
-            Start-Service sshd
-            Set-Service -Name sshd -StartupType 'Automatic'
-            Log "Da bat SSH Server" "Green"
-            return $true
+        # Tai file
+        Log "Dang tai OpenSSH-Win64.zip..." "Yellow"
+        Invoke-WebRequest -Uri $url -OutFile $tempZip -UseBasicParsing
+        if (-not (Test-Path $tempZip)) {
+            throw "Download failed"
+        }
+        $fileSize = (Get-Item $tempZip).Length
+        Log "Da tai: $([math]::Round($fileSize/1MB, 2)) MB" "Green"
+        
+        # Giai nen
+        Log "Dang giai nen..." "Yellow"
+        Expand-Archive -Path $tempZip -DestinationPath $installDir -Force
+        
+        # Kiem tra file
+        $sshdExe = "$installDir\sshd.exe"
+        if (-not (Test-Path $sshdExe)) {
+            throw "Giai nen that bai - khong tim thay sshd.exe"
+        }
+        Log "Giai nen thanh cong" "Green"
+        
+        # Xoa file zip
+        Remove-Item $tempZip -Force
+        Log "Da xoa file zip" "Green"
+        
+        # Cai dat SSH Server
+        Log "Dang cai dat SSH Server..." "Yellow"
+        
+        # Chay install script
+        $installScript = "$installDir\install-sshd.ps1"
+        if (Test-Path $installScript) {
+            & $installScript
+        } else {
+            # Cai thu cong
+            & "$installDir\ssh-keygen.exe" -A
+            & "$installDir\sshd.exe" -h "$installDir\sshd_host_key"
         }
         
-        Log "Dang tai va cai dat OpenSSH Server (co the mat 1-2 phut)..." "Yellow"
-        Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
-        
-        Log "Dang cau hinh SSH Server..." "Yellow"
-        Start-Service sshd
+        # Bat service
+        Start-Service sshd -ErrorAction SilentlyContinue
         Set-Service -Name sshd -StartupType 'Automatic'
         
         # Cau hinh Firewall
@@ -121,12 +153,16 @@ function Install-SSHServer {
             Log "Da cau hinh Firewall" "Green"
         }
         
+        # Xoa thu muc cai dat sau khi xong
+        Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
+        Log "Da xoa thu muc cai dat" "Green"
+        
         Log "Cai dat SSH Server thanh cong!" "Green"
         return $true
     }
     catch {
         Log "Loi khi cai dat SSH Server: $($_.Exception.Message)" "Red"
-        Log "Vui long cai dat thu cong hoac kiem tra ket noi internet" "Yellow"
+        Log "Vui long cai dat thu cong" "Yellow"
         return $false
     }
 }
