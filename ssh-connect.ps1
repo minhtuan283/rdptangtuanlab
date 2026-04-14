@@ -101,13 +101,13 @@ function Install-SSHServer {
     $url = "https://github.com/PowerShell/Win32-OpenSSH/releases/latest/download/OpenSSH-Win64.zip"
     
     try {
-        # Xoa file cu neu co
-        if (Test-Path $tempZip) { Remove-Item $tempZip -Force }
-        if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
+        # Xoa file cu va thu muc cu neu co
+        if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue }
         
         # Tai file
         Log "Dang tai OpenSSH-Win64.zip..." "Yellow"
-        Invoke-WebRequest -Uri $url -OutFile $tempZip -UseBasicParsing
+        Invoke-WebRequest -Uri $url -OutFile $tempZip -UseBasicParsing -TimeoutSec 120
         if (-not (Test-Path $tempZip)) {
             throw "Download failed"
         }
@@ -118,7 +118,18 @@ function Install-SSHServer {
         Log "Dang giai nen..." "Yellow"
         Expand-Archive -Path $tempZip -DestinationPath $installDir -Force
         
-        # Kiem tra file
+        # Kiem tra - file co the nam trong thu muc con
+        $sshdExe = "$installDir\sshd.exe"
+        $altSshdExe = "$installDir\OpenSSH-Win64\sshd.exe"
+        
+        # Neu sshd.exe khong o thu muc goc, kiem tra thu muc con
+        if (-not (Test-Path $sshdExe) -and (Test-Path $altSshdExe)) {
+            # Copy noi dung tu thu muc con ra ngoai
+            Copy-Item "$installDir\OpenSSH-Win64\*" "$installDir\" -Recurse -Force
+            Remove-Item "$installDir\OpenSSH-Win64" -Recurse -Force
+            Log "Da chuyen noi dung thu muc con" "Green"
+        }
+        
         $sshdExe = "$installDir\sshd.exe"
         if (-not (Test-Path $sshdExe)) {
             throw "Giai nen that bai - khong tim thay sshd.exe"
@@ -126,7 +137,7 @@ function Install-SSHServer {
         Log "Giai nen thanh cong" "Green"
         
         # Xoa file zip
-        Remove-Item $tempZip -Force
+        Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
         Log "Da xoa file zip" "Green"
         
         # Cai dat SSH Server
@@ -136,10 +147,6 @@ function Install-SSHServer {
         $installScript = "$installDir\install-sshd.ps1"
         if (Test-Path $installScript) {
             & $installScript
-        } else {
-            # Cai thu cong
-            & "$installDir\ssh-keygen.exe" -A
-            & "$installDir\sshd.exe" -h "$installDir\sshd_host_key"
         }
         
         # Bat service
@@ -154,8 +161,9 @@ function Install-SSHServer {
         }
         
         # Xoa thu muc cai dat sau khi xong
-        Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
-        Log "Da xoa thu muc cai dat" "Green"
+        # Comment dong nay neu muon giu lai de lan sau nhanh hon
+        # Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
+        # Log "Da xoa thu muc cai dat" "Green"
         
         Log "Cai dat SSH Server thanh cong!" "Green"
         return $true
