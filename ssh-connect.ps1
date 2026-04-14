@@ -121,7 +121,7 @@ Host $Hostname
 
 # Main
 Clear-Host
-Log "=== MARK6 SSH CONNECTOR ===" "Cyan"
+Log "=== AGENT SSH CONNECTOR ===" "Cyan"
 Log "Kiem tra moi truong..." "Gray"
 
 # Kiem tra cloudflared
