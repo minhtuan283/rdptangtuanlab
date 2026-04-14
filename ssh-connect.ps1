@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # Mark6 SSH Quick Connect - Cloudflare Tunnel
 $ErrorActionPreference = "Stop"
-$Host.UI.RawUI.WindowTitle = "Mark6 SSH Connector"
+$Host.UI.RawUI.WindowTitle = "Agent SSH Connector"
 
 function Log {
     param([string]$Message, [string]$Color = "White")
