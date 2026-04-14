@@ -1,7 +1,7 @@
 #Requires -Version 5.1
-# Mark6 SSH Quick Connect - Cloudflare Tunnel
+# Agent SSH Quick Connect - Cloudflare Tunnel
 $ErrorActionPreference = "Stop"
-$Host.UI.RawUI.WindowTitle = "Agent SSH Connector"
+$Host.UI.RawUI.WindowTitle = "Mark6 SSH Connector"
 
 function Log {
     param([string]$Message, [string]$Color = "White")
@@ -65,6 +65,69 @@ function Install-Cloudflared {
     catch {
         Log "Loi: $($_.Exception.Message)" "Red"
         return $null
+    }
+}
+
+function Install-SSHServer {
+    Log "Kiem tra SSH Server..." "Yellow"
+    
+    # Kiem tra da cai chua
+    $sshService = Get-Service sshd -ErrorAction SilentlyContinue
+    
+    if ($sshService) {
+        if ($sshService.Status -eq "Running") {
+            Log "SSH Server dang chay" "Green"
+            return $true
+        } else {
+            Log "SSH Server da cai nhung chua chay. Dang bat..." "Yellow"
+            try {
+                Start-Service sshd
+                Set-Service -Name sshd -StartupType 'Automatic'
+                Log "Da bat SSH Server" "Green"
+                return $true
+            }
+            catch {
+                Log "Loi khi bat SSH Server: $($_.Exception.Message)" "Red"
+                return $false
+            }
+        }
+    }
+    
+    # Chua cai dat, tien hanh cai
+    Log "SSH Server chua duoc cai dat. Dang cai dat..." "Yellow"
+    
+    try {
+        $capability = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
+        
+        if ($capability.State -eq "Installed") {
+            Log "OpenSSH Server da cai nhung service chua chay" "Yellow"
+            Start-Service sshd
+            Set-Service -Name sshd -StartupType 'Automatic'
+            Log "Da bat SSH Server" "Green"
+            return $true
+        }
+        
+        Log "Dang tai va cai dat OpenSSH Server (co the mat 1-2 phut)..." "Yellow"
+        Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
+        
+        Log "Dang cau hinh SSH Server..." "Yellow"
+        Start-Service sshd
+        Set-Service -Name sshd -StartupType 'Automatic'
+        
+        # Cau hinh Firewall
+        $firewallRule = Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue
+        if (-not $firewallRule) {
+            New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
+            Log "Da cau hinh Firewall" "Green"
+        }
+        
+        Log "Cai dat SSH Server thanh cong!" "Green"
+        return $true
+    }
+    catch {
+        Log "Loi khi cai dat SSH Server: $($_.Exception.Message)" "Red"
+        Log "Vui long cai dat thu cong hoac kiem tra ket noi internet" "Yellow"
+        return $false
     }
 }
 
@@ -138,9 +201,18 @@ if (-not $cfPath) {
 Log "Cloudflared: $cfPath" "Green"
 Write-Host ""
 
+# Kiem tra/cai dat SSH Server
+$sshReady = Install-SSHServer
+if (-not $sshReady) {
+    Log "Khong the tiep tuc vi SSH Server chua san sang." "Red"
+    Read-Host "Nhan Enter de thoat"
+    exit 1
+}
+Write-Host ""
+
 # Nhap hostname
 do {
-    $hostname = Read-Host "Nhap host URL:"
+    $hostname = Read-Host "Nhap host URL"
     if ([string]::IsNullOrWhiteSpace($hostname)) {
         Log "Hostname khong duoc de trong!" "Red"
     }
