@@ -140,7 +140,7 @@ Write-Host ""
 
 # Nhap hostname
 do {
-    $hostname = Read-Host "Nhap hostname (vd: mark6.tangtuanlab.io.vn)"
+    $hostname = Read-Host "Nhap host URL:"
     if ([string]::IsNullOrWhiteSpace($hostname)) {
         Log "Hostname khong duoc de trong!" "Red"
     }
