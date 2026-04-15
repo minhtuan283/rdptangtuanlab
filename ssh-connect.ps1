@@ -1,11 +1,55 @@
 #Requires -Version 5.1
 # Mark6 SSH Quick Connect - Cloudflare Tunnel
 $ErrorActionPreference = "Stop"
-$Host.UI.RawUI.WindowTitle = "AGENT SSH Connector"
+$Host.UI.RawUI.WindowTitle = "Agent SSH Connector"
+
+# ============== SETTINGS ==============
+# 0 = Tat log, 1 = Bat log ra C:\mark6-connect.log
+$EnableLog = 0
+# =====================================
+
+$LogFile = "C:\mark6-connect.log"
+if ($EnableLog -eq 1) {
+    if (Test-Path $LogFile) { Remove-Item $LogFile -Force -ErrorAction SilentlyContinue }
+}
+
+# Cleanup function
+function Do-Cleanup {
+    Write-Host ""
+    Write-Host "[Cleanup] Dang tat SSH Server..." -ForegroundColor Yellow
+    if ($EnableLog -eq 1) { Log-ToFile "[Cleanup] Dang tat SSH Server..." }
+    
+    $sshService = Get-Service sshd -ErrorAction SilentlyContinue
+    if ($sshService -and $sshService.Status -eq "Running") {
+        Stop-Service sshd -ErrorAction SilentlyContinue
+        Write-Host "[Cleanup] Da tat SSH Server" -ForegroundColor Green
+        if ($EnableLog -eq 1) { Log-ToFile "[Cleanup] Da tat SSH Server" }
+    }
+    
+    $configFile = "$env:USERPROFILE\.ssh\config"
+    if (Test-Path $configFile) {
+        Remove-Item $configFile -Force -ErrorAction SilentlyContinue
+        Write-Host "[Cleanup] Da xoa SSH config" -ForegroundColor Green
+        if ($EnableLog -eq 1) { Log-ToFile "[Cleanup] Da xoa SSH config" }
+    }
+    
+    Write-Host "[Cleanup] Hoan tat!" -ForegroundColor Green
+    if ($EnableLog -eq 1) { Log-ToFile "[Cleanup] Hoan tat!" }
+}
+
+function Log-ToFile {
+    param([string]$Message)
+    if ($EnableLog -eq 1) {
+        $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        "[$timestamp] $Message" | Out-File -FilePath $LogFile -Append -Encoding UTF8
+    }
+}
 
 function Log {
     param([string]$Message, [string]$Color = "White")
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $Message" -ForegroundColor $Color
+    $output = "[$(Get-Date -Format 'HH:mm:ss')] $Message"
+    Write-Host $output -ForegroundColor $Color
+    if ($EnableLog -eq 1) { Log-ToFile $output }
 }
 
 function Test-PortInUse {
@@ -92,7 +136,6 @@ function Install-SSHServer {
         }
     }
     
-    # Tai va cai tu GitHub Win32-OpenSSH
     Log "SSH Server chua duoc cai dat. Tai OpenSSH tu GitHub..." "Yellow"
     
     $tempZip = "${env:TEMP}\OpenSSH-Win64.zip"
@@ -189,24 +232,19 @@ Host $Hostname
 
 # ==================== MAIN ====================
 
+# Register Ctrl+C handler (works in PS 5.1+)
+Register-ObjectEvent -InputObject ([Console]) -EventName CancelKeyPress -Action {
+    Write-Host ""
+    Write-Host "[Ctrl+C] Phat hien ngat - Cleanup..." -ForegroundColor Yellow
+    if ($EnableLog -eq 1) { Log-ToFile "[Ctrl+C] Phat hien ngat - Cleanup..." }
+    Do-Cleanup
+} | Out-Null
+
 try {
-    # Cleanup function
-    function Stop-SSHServer-Local {
-        $sshService = Get-Service sshd -ErrorAction SilentlyContinue
-        if ($sshService -and $sshService.Status -eq "Running") {
-            Log "Dang tat SSH Server..." "Yellow"
-            Stop-Service sshd -ErrorAction SilentlyContinue
-            Log "Da tat SSH Server" "Green"
-        }
-    }
-    
-    # Catch Ctrl+C
-    $script:isExiting = $false
-    
-    # Main
     Clear-Host
-    Log "=== AGENT AI SSH CONNECTOR ===" "Cyan"
-    Log "Khi tat cua so nay, SSH Server se tu dong tat." "Gray"
+    Log "=== AGENT SSH CONNECTOR ===" "Cyan"
+    Log "Log file: $LogFile" "Gray"
+    Log "Dong cua so nay se tu dong cleanup SSH Server." "Gray"
     Write-Host ""
     
     # Kiem tra cloudflared
@@ -238,6 +276,8 @@ try {
         }
     } while ([string]::IsNullOrWhiteSpace($hostname))
     
+    Log-ToFile "Hostname: $hostname"
+    
     # Setup SSH config
     Setup-SSHConfig -Hostname $hostname
     
@@ -255,7 +295,7 @@ try {
         Log "Port khong hop le! Nhap lai..." "Red"
     } while ($true)
     
-    # Kiem tra port local co bi chiem khong
+    # Kiem tra port local
     if (Test-PortInUse -Port $port) {
         Log "Port $port tren may nay dang bi chiem!" "Red"
         do {
@@ -272,6 +312,7 @@ try {
     }
     
     Log "Port reverse: $port" "Green"
+    Log-ToFile "Port: $port"
     
     # Nhap username
     do {
@@ -280,6 +321,8 @@ try {
             Log "Username khong duoc de trong!" "Red"
         }
     } while ([string]::IsNullOrWhiteSpace($username))
+    
+    Log-ToFile "Username: $username"
     
     # Thong bao
     Write-Host ""
@@ -305,35 +348,21 @@ try {
     Write-Host ""
     
     Log "Dang ket noi SSH..." "Green"
-    Log "Lenh: ssh -R ${port}:localhost:22 ${username}@${hostname}" "Gray"
-    Log "Neu port da bi chiem tren server, lenh se that bai ngay." "Gray"
     Write-Host ""
     
-    # Chay SSH voi reverse tunnel + ExitOnForwardFailure
+    # Chay SSH
     $sshCommand = "ssh -o ExitOnForwardFailure=yes -R ${port}:localhost:22 ${username}@${hostname}"
+    Log "Lenh: $sshCommand" "Gray"
+    Write-Host ""
+    
     Invoke-Expression $sshCommand
     
-    # Neu SSH ngat (Ctrl+C hoac loi)
-    $script:isExiting = $true
+    # SSH da ngat - cleanup
+    Do-Cleanup
     
-} finally {
-    # Luon chay khi script ket thuc (Ctrl+C, tat window, loi...)
+} catch {
     Write-Host ""
-    Log "Dang cleanup..." "Yellow"
-    
-    # Tat SSH Server
-    $sshService = Get-Service sshd -ErrorAction SilentlyContinue
-    if ($sshService -and $sshService.Status -eq "Running") {
-        Stop-Service sshd -ErrorAction SilentlyContinue
-        Log "Da tat SSH Server" "Green"
-    }
-    
-    # Xoa SSH config
-    $configFile = "$env:USERPROFILE\.ssh\config"
-    if (Test-Path $configFile) {
-        Remove-Item $configFile -Force -ErrorAction SilentlyContinue
-        Log "Da xoa SSH config" "Green"
-    }
-    
-    Log "Cleanup hoan tat" "Green"
+    Write-Host "[LOI] Script gap loi: $($_.Exception.Message)" -ForegroundColor Red
+    if ($EnableLog -eq 1) { Log-ToFile "[LOI] $($_.Exception.Message)" }
+    Do-Cleanup
 }
