@@ -177,13 +177,99 @@ Write-Host "  LUU Y: KHONG TAT CUA SO NAY TRONG KHI REMOTE!" -ForegroundColor Re
 Write-Host "  ---> Tool create by TangTuanLab <----" -ForegroundColor Gray
 Write-Host ""
 
-# Mo dung app Remote Desktop Connection de user tu nhap tay
-Log "Mo Remote Desktop Connection..." "Gray"
-$mstscProcess = Start-Process -FilePath "$env:SystemRoot\System32\mstsc.exe" -PassThru
+# Kiem tra mstsc.exe co ton tai khong
+$mstscPath = "$env:SystemRoot\System32\mstsc.exe"
+$hasMstsc = Test-Path $mstscPath
 
-# Khong hoi Enter; cho den khi user dong Remote Desktop thi moi tat tunnel
-if ($mstscProcess) {
-    Wait-Process -Id $mstscProcess.Id
+if ($hasMstsc) {
+    # Co mstsc.exe -> chay nhu binh thuong
+    Log "Mo Remote Desktop Connection..." "Gray"
+    $mstscProcess = Start-Process -FilePath $mstscPath -PassThru
+
+    # Khong hoi Enter; cho den khi user dong Remote Desktop thi moi tat tunnel
+    if ($mstscProcess) {
+        Wait-Process -Id $mstscProcess.Id
+    }
+}
+else {
+    # Khong co mstsc.exe -> hien 2 lua chon
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Yellow
+    Write-Host "KHONG TIM THAY REMOTE DESKTOP CONNECTION (mstsc.exe)" -ForegroundColor Red
+    Write-Host "============================================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Tunnel dang chay o: localhost:$port" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Chon mot lua chon:" -ForegroundColor White
+    Write-Host "  1. Giu ket noi voi port $port (giu lien ket den khi ban tat cua so nay hoac bam Ctrl+C)" -ForegroundColor Green
+    Write-Host "  2. Tai va cai dat Remote Desktop Connection (tu Microsoft Store)" -ForegroundColor Green
+    Write-Host ""
+
+    do {
+        $choice = Read-Host "Lua chon (1 hoac 2)"
+        if ($choice -eq '1') {
+            Write-Host ""
+            Write-Host "Dang giu ket noi... Bam Ctrl+C de dung." -ForegroundColor Yellow
+            Write-Host "Computer: localhost:$port" -ForegroundColor Cyan
+            Write-Host ""
+
+            # Giu ket noi cho den khi user tat
+            try {
+                while (-not $cfProcess.HasExited) {
+                    Start-Sleep -Seconds 1
+                }
+            }
+            catch {
+                # User bam Ctrl+C
+            }
+            break
+        }
+        elseif ($choice -eq '2') {
+            Write-Host ""
+            Log "Dang cai dat Remote Desktop Connection tu Microsoft Store..." "Yellow"
+
+            # Thu cai dat bang winget (Microsoft Remote Desktop)
+            try {
+                # Kiem tra winget
+                $wingetPath = Get-Command winget -ErrorAction SilentlyContinue
+                if ($wingetPath) {
+                    Log "Dung winget de cai dat Microsoft Remote Desktop..." "Gray"
+                    $installResult = winget install --id Microsoft.RemoteDesktop -e --source winget --accept-source-agreements --accept-package-agreements
+                    if ($LASTEXITCODE -eq 0) {
+                        Log "Cai dat thanh cong! Dang mo Remote Desktop..." "Green"
+                        # Thu mo lai mstsc.exe (co the can restart de cap nhat PATH)
+                        if (Test-Path $mstscPath) {
+                            $mstscProcess = Start-Process -FilePath $mstscPath -PassThru
+                            if ($mstscProcess) {
+                                Wait-Process -Id $mstscProcess.Id
+                            }
+                        }
+                        else {
+                            Log "Da cai dat nhung khong tim thay mstsc.exe. Vui long khoi dong lai script." "Yellow"
+                        }
+                    }
+                    else {
+                        Log "Cai dat that bai. Ma loi: $LASTEXITCODE" "Red"
+                        Log "Ban co the cai dat thu cong tu Microsoft Store: tim 'Microsoft Remote Desktop'" "Gray"
+                    }
+                }
+                else {
+                    Log "Khong tim thay winget. Vui long cai dat thu cong tu Microsoft Store." "Red"
+                    Log "Mo Microsoft Store va tim: 'Microsoft Remote Desktop'" "Gray"
+                    # Mo Microsoft Store
+                    Start-Process "ms-windows-store://pdp/?ProductId=9WZDNCRFJ3PS" -ErrorAction SilentlyContinue
+                }
+            }
+            catch {
+                Log "Loi khi cai dat: $($_.Exception.Message)" "Red"
+                Log "Vui long cai dat thu cong tu Microsoft Store: tim 'Microsoft Remote Desktop'" "Gray"
+            }
+            break
+        }
+        else {
+            Write-Host "Chi nhap 1 hoac 2 thoi!" -ForegroundColor Red
+        }
+    } while ($true)
 }
 
 Log "Dang dong tunnel (PID: $($cfProcess.Id))..." "Yellow"
