@@ -202,7 +202,7 @@ else {
     Write-Host ""
     Write-Host "Chon mot lua chon:" -ForegroundColor White
     Write-Host "  1. Giu ket noi voi port $port (giu lien ket den khi ban tat cua so nay hoac bam Ctrl+C)" -ForegroundColor Green
-    Write-Host "  2. Tai va cai dat Remote Desktop Connection (tu Microsoft Store)" -ForegroundColor Green
+    Write-Host "  2. Tai va cai dat Windows App (tu Microsoft Store)" -ForegroundColor Green
     Write-Host ""
 
     do {
@@ -226,43 +226,36 @@ else {
         }
         elseif ($choice -eq '2') {
             Write-Host ""
-            Log "Dang cai dat Remote Desktop Connection tu Microsoft Store..." "Yellow"
+            Log "Dang cai dat Windows App tu Microsoft Store..." "Yellow"
 
-            # Thu cai dat bang winget (Microsoft Remote Desktop)
+            # Thu cai dat bang winget (Windows App)
             try {
                 # Kiem tra winget
                 $wingetPath = Get-Command winget -ErrorAction SilentlyContinue
                 if ($wingetPath) {
-                    Log "Dung winget de cai dat Microsoft Remote Desktop..." "Gray"
-                    $installResult = winget install --id Microsoft.RemoteDesktop -e --source winget --accept-source-agreements --accept-package-agreements
+                    Log "Dung winget de cai dat Windows App (ung dung thay the Microsoft Remote Desktop)..." "Gray"
+                    winget install --id Microsoft.WindowsApp -e --source winget --accept-source-agreements --accept-package-agreements
                     if ($LASTEXITCODE -eq 0) {
-                        Log "Cai dat thanh cong! Dang mo Remote Desktop..." "Green"
-                        # Thu mo lai mstsc.exe (co the can restart de cap nhat PATH)
-                        if (Test-Path $mstscPath) {
-                            $mstscProcess = Start-Process -FilePath $mstscPath -PassThru
-                            if ($mstscProcess) {
-                                Wait-Process -Id $mstscProcess.Id
-                            }
-                        }
-                        else {
-                            Log "Da cai dat nhung khong tim thay mstsc.exe. Vui long khoi dong lai script." "Yellow"
-                        }
+                        Log "Cai dat thanh cong! Dang mo Windows App..." "Green"
+                        Log "Chon Add PC, sau do nhap PC name: localhost:$port" "Cyan"
+                        Start-Process "shell:AppsFolder\MicrosoftCorporationII.WindowsApp_8wekyb3d8bbwe!App"
                     }
                     else {
                         Log "Cai dat that bai. Ma loi: $LASTEXITCODE" "Red"
-                        Log "Ban co the cai dat thu cong tu Microsoft Store: tim 'Microsoft Remote Desktop'" "Gray"
+                        Log "Ban co the cai dat thu cong tu Microsoft Store: tim 'Windows App'" "Gray"
+                        Start-Process "ms-windows-store://pdp/?ProductId=9N1F85V9T8BN" -ErrorAction SilentlyContinue
                     }
                 }
                 else {
                     Log "Khong tim thay winget. Vui long cai dat thu cong tu Microsoft Store." "Red"
-                    Log "Mo Microsoft Store va tim: 'Microsoft Remote Desktop'" "Gray"
+                    Log "Mo Microsoft Store va tim: 'Windows App'" "Gray"
                     # Mo Microsoft Store
-                    Start-Process "ms-windows-store://pdp/?ProductId=9WZDNCRFJ3PS" -ErrorAction SilentlyContinue
+                    Start-Process "ms-windows-store://pdp/?ProductId=9N1F85V9T8BN" -ErrorAction SilentlyContinue
                 }
             }
             catch {
                 Log "Loi khi cai dat: $($_.Exception.Message)" "Red"
-                Log "Vui long cai dat thu cong tu Microsoft Store: tim 'Microsoft Remote Desktop'" "Gray"
+                Log "Vui long cai dat thu cong tu Microsoft Store: tim 'Windows App'" "Gray"
             }
             break
         }
