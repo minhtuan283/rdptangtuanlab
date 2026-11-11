@@ -72,6 +72,120 @@ function Install-Cloudflared {
     }
 }
 
+
+function Get-MstscPath {
+    # Xu ly ca truong hop PowerShell 32-bit chay tren Windows 64-bit.
+    $candidates = @()
+    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+        $candidates += "$env:SystemRoot\Sysnative\mstsc.exe"
+    }
+    $candidates += "$env:SystemRoot\System32\mstsc.exe"
+    $candidates += "$env:SystemRoot\SysWOW64\mstsc.exe"
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+function Get-MstscInstallerUrl {
+    # Link tai setup.exe duoc Microsoft cong bo trong tai lieu cai dat lai Remote Desktop Connection.
+    $architecture = $null
+    try {
+        $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        switch ([int]$cpu.Architecture) {
+            12 { $architecture = 'ARM64' }
+            9  { $architecture = 'AMD64' }
+            0  { $architecture = 'X86' }
+            default { $architecture = $null }
+        }
+    }
+    catch {
+        $archText = $env:PROCESSOR_ARCHITEW6432
+        if ([string]::IsNullOrWhiteSpace($archText)) {
+            $archText = $env:PROCESSOR_ARCHITECTURE
+        }
+        if ($archText -match 'ARM64') { $architecture = 'ARM64' }
+        elseif ($archText -match 'AMD64') { $architecture = 'AMD64' }
+        elseif ($archText -match '86') { $architecture = 'X86' }
+    }
+
+    switch ($architecture) {
+        'ARM64' { return 'https://go.microsoft.com/fwlink/?linkid=2247577' }
+        'AMD64' { return 'https://go.microsoft.com/fwlink/?linkid=2247659' }
+        'X86'   { return 'https://go.microsoft.com/fwlink/?linkid=2247660' }
+        default { throw "Khong xac dinh duoc kien truc Windows de chon bo cai mstsc (Architecture: $architecture)." }
+    }
+}
+
+function Install-Mstsc {
+    $installerPath = Join-Path $env:TEMP "mstsc-setup-$PID.exe"
+    try {
+        Log "Xac dinh kien truc Windows..." "Gray"
+        $downloadUrl = Get-MstscInstallerUrl
+        Log "Dang tai bo cai Remote Desktop Connection chinh chu tu Microsoft..." "Yellow"
+
+        # TLS 1.2 cho cac may Windows PowerShell 5.1 cu.
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        }
+        catch {}
+
+        if (Test-Path -LiteralPath $installerPath) {
+            Remove-Item -LiteralPath $installerPath -Force
+        }
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -UseBasicParsing -ErrorAction Stop
+
+        if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
+            throw "Khong tai duoc file setup.exe."
+        }
+
+        $fileInfo = Get-Item -LiteralPath $installerPath
+        if ($fileInfo.Length -lt 100KB) {
+            throw "File setup.exe tai ve qua nho, co the la trang loi thay vi bo cai."
+        }
+
+        # Chi chay bo cai neu chu ky so hop le va thuoc Microsoft.
+        $signature = Get-AuthenticodeSignature -FilePath $installerPath
+        if ($signature.Status -ne 'Valid') {
+            throw "Chu ky so cua bo cai khong hop le: $($signature.Status). Da huy de tranh chay file khong xac minh duoc."
+        }
+        if ($signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
+            throw "Nha phat hanh bo cai khong phai Microsoft Corporation. Da huy cai dat."
+        }
+
+        Log "Da tai va xac minh chu ky Microsoft. Dang chay bo cai voi quyen Administrator..." "Green"
+        $installProcess = Start-Process -FilePath $installerPath -Verb RunAs -Wait -PassThru
+
+        if ($installProcess.ExitCode -notin @(0, 3010)) {
+            throw "Bo cai ket thuc voi ma loi: $($installProcess.ExitCode)."
+        }
+
+        Start-Sleep -Seconds 2
+        $installedMstsc = Get-MstscPath
+        if (-not $installedMstsc) {
+            throw "Bo cai da chay nhung chua tim thay mstsc.exe. Hay khoi dong lai Windows roi kiem tra lai."
+        }
+
+        Log "Da khoi phuc Remote Desktop Connection: $installedMstsc" "Green"
+        if ($installProcess.ExitCode -eq 3010) {
+            Log "Windows yeu cau khoi dong lai de hoan tat cai dat." "Yellow"
+        }
+        return $installedMstsc
+    }
+    catch {
+        Log "Khong the cai dat mstsc.exe: $($_.Exception.Message)" "Red"
+        return $null
+    }
+    finally {
+        if (Test-Path -LiteralPath $installerPath) {
+            Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 # Main
 Log "=== CLAUDFLARE RDP CONNECTOR ===" "Cyan"
 Log "Kiem tra moi truong..." "Gray"
@@ -178,8 +292,8 @@ Write-Host "  ---> Tool create by TangTuanLab <----" -ForegroundColor Gray
 Write-Host ""
 
 # Kiem tra mstsc.exe co ton tai khong
-$mstscPath = "$env:SystemRoot\System32\mstsc.exe"
-$hasMstsc = Test-Path $mstscPath
+$mstscPath = Get-MstscPath
+$hasMstsc = -not [string]::IsNullOrWhiteSpace($mstscPath)
 
 if ($hasMstsc) {
     # Co mstsc.exe -> chay nhu binh thuong
@@ -192,7 +306,7 @@ if ($hasMstsc) {
     }
 }
 else {
-    # Khong co mstsc.exe -> hien 2 lua chon
+    # Khong co mstsc.exe -> cho phep cai lai ban desktop co san cua Windows.
     Write-Host ""
     Write-Host "============================================================" -ForegroundColor Yellow
     Write-Host "KHONG TIM THAY REMOTE DESKTOP CONNECTION (mstsc.exe)" -ForegroundColor Red
@@ -201,67 +315,55 @@ else {
     Write-Host "Tunnel dang chay o: localhost:$port" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Chon mot lua chon:" -ForegroundColor White
-    Write-Host "  1. Giu ket noi voi port $port (giu lien ket den khi ban tat cua so nay hoac bam Ctrl+C)" -ForegroundColor Green
-    Write-Host "  2. Khoi phuc Remote Desktop Connection mac dinh cua Windows (can Administrator)" -ForegroundColor Green
+    Write-Host "  1. Giu tunnel chay de ket noi bang RDP client khac" -ForegroundColor Green
+    Write-Host "  2. Tai va cai lai mstsc.exe desktop chinh chu tu Microsoft" -ForegroundColor Green
     Write-Host ""
 
     do {
         $choice = Read-Host "Lua chon (1 hoac 2)"
         if ($choice -eq '1') {
             Write-Host ""
-            Write-Host "Dang giu ket noi... Bam Ctrl+C de dung." -ForegroundColor Yellow
+            Write-Host "Dang giu tunnel... Bam Ctrl+C de dung." -ForegroundColor Yellow
             Write-Host "Computer: localhost:$port" -ForegroundColor Cyan
             Write-Host ""
-
-            # Giu ket noi cho den khi user tat
             try {
                 while (-not $cfProcess.HasExited) {
                     Start-Sleep -Seconds 1
                 }
             }
             catch {
-                # User bam Ctrl+C
+                # Nguoi dung bam Ctrl+C.
             }
             break
         }
         elseif ($choice -eq '2') {
             Write-Host ""
-            Log "Dang khoi phuc Remote Desktop Connection (mstsc.exe) cua Windows..." "Yellow"
+            $mstscPath = Install-Mstsc
 
-            # Kiem tra quyen quan tri truoc khi chay DISM.
-            $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-            if (-not $isAdmin) {
-                Log "Can chay lai script bang Run as administrator de khoi phuc mstsc.exe." "Red"
-                Read-Host "Bam Enter de dong tunnel"
-                break
-            }
-
-            try {
-                Log "Dang bat Windows feature: Microsoft-RemoteDesktopConnection..." "Gray"
-                DISM.exe /Online /Enable-Feature /FeatureName:Microsoft-RemoteDesktopConnection /All
-                if ($LASTEXITCODE -ne 0) {
-                    throw "DISM that bai voi ma loi $LASTEXITCODE"
-                }
-
-                if (Test-Path $mstscPath) {
-                    Log "Da khoi phuc mstsc.exe. Dang mo ket noi..." "Green"
-                    $mstscProcess = Start-Process -FilePath $mstscPath -ArgumentList "/v:localhost:$port" -PassThru
+            if ($mstscPath) {
+                Log "Dang mo Remote Desktop Connection..." "Green"
+                try {
+                    $mstscProcess = Start-Process -FilePath $mstscPath -PassThru
                     if ($mstscProcess) {
-                        Wait-Process -Id $mstscProcess.Id
+                        Wait-Process -Id $mstscProcess.Id -ErrorAction SilentlyContinue
                     }
                 }
-                else {
-                    Log "Feature da bat nhung mstsc.exe van bi thieu. Can sua file he thong." "Red"
-                    Log "Chay Command Prompt bang quyen Administrator, sau do chay lan luot:" "Yellow"
-                    Log "DISM.exe /Online /Cleanup-Image /RestoreHealth" "Cyan"
-                    Log "sfc /scannow" "Cyan"
-                    Log "Sau do khoi dong lai Windows va chay lai script." "Yellow"
-                    Read-Host "Bam Enter de dong tunnel"
+                catch {
+                    Log "Khong the mo mstsc.exe: $($_.Exception.Message)" "Red"
                 }
             }
-            catch {
-                Log "Loi khi khoi phuc: $($_.Exception.Message)" "Red"
-                Read-Host "Bam Enter de dong tunnel"
+            else {
+                Write-Host ""
+                Log "Khong cai duoc mstsc.exe. Tunnel van se duoc giu de ban khong mat ket noi." "Yellow"
+                Write-Host "Bam Ctrl+C de dung tunnel khi khong can nua." -ForegroundColor Yellow
+                try {
+                    while (-not $cfProcess.HasExited) {
+                        Start-Sleep -Seconds 1
+                    }
+                }
+                catch {
+                    # Nguoi dung bam Ctrl+C.
+                }
             }
             break
         }
