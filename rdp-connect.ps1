@@ -202,7 +202,7 @@ else {
     Write-Host ""
     Write-Host "Chon mot lua chon:" -ForegroundColor White
     Write-Host "  1. Giu ket noi voi port $port (giu lien ket den khi ban tat cua so nay hoac bam Ctrl+C)" -ForegroundColor Green
-    Write-Host "  2. Tai va cai dat Windows App (tu Microsoft Store)" -ForegroundColor Green
+    Write-Host "  2. Khoi phuc Remote Desktop Connection mac dinh cua Windows (can Administrator)" -ForegroundColor Green
     Write-Host ""
 
     do {
@@ -226,36 +226,42 @@ else {
         }
         elseif ($choice -eq '2') {
             Write-Host ""
-            Log "Dang cai dat Windows App tu Microsoft Store..." "Yellow"
+            Log "Dang khoi phuc Remote Desktop Connection (mstsc.exe) cua Windows..." "Yellow"
 
-            # Thu cai dat bang winget (Windows App)
+            # Kiem tra quyen quan tri truoc khi chay DISM.
+            $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            if (-not $isAdmin) {
+                Log "Can chay lai script bang Run as administrator de khoi phuc mstsc.exe." "Red"
+                Read-Host "Bam Enter de dong tunnel"
+                break
+            }
+
             try {
-                # Kiem tra winget
-                $wingetPath = Get-Command winget -ErrorAction SilentlyContinue
-                if ($wingetPath) {
-                    Log "Dung winget de cai dat Windows App (ung dung thay the Microsoft Remote Desktop)..." "Gray"
-                    winget install --id Microsoft.WindowsApp -e --source winget --accept-source-agreements --accept-package-agreements
-                    if ($LASTEXITCODE -eq 0) {
-                        Log "Cai dat thanh cong! Dang mo Windows App..." "Green"
-                        Log "Chon Add PC, sau do nhap PC name: localhost:$port" "Cyan"
-                        Start-Process "shell:AppsFolder\MicrosoftCorporationII.WindowsApp_8wekyb3d8bbwe!App"
-                    }
-                    else {
-                        Log "Cai dat that bai. Ma loi: $LASTEXITCODE" "Red"
-                        Log "Ban co the cai dat thu cong tu Microsoft Store: tim 'Windows App'" "Gray"
-                        Start-Process "ms-windows-store://pdp/?ProductId=9N1F85V9T8BN" -ErrorAction SilentlyContinue
+                Log "Dang bat Windows feature: Microsoft-RemoteDesktopConnection..." "Gray"
+                DISM.exe /Online /Enable-Feature /FeatureName:Microsoft-RemoteDesktopConnection /All
+                if ($LASTEXITCODE -ne 0) {
+                    throw "DISM that bai voi ma loi $LASTEXITCODE"
+                }
+
+                if (Test-Path $mstscPath) {
+                    Log "Da khoi phuc mstsc.exe. Dang mo ket noi..." "Green"
+                    $mstscProcess = Start-Process -FilePath $mstscPath -ArgumentList "/v:localhost:$port" -PassThru
+                    if ($mstscProcess) {
+                        Wait-Process -Id $mstscProcess.Id
                     }
                 }
                 else {
-                    Log "Khong tim thay winget. Vui long cai dat thu cong tu Microsoft Store." "Red"
-                    Log "Mo Microsoft Store va tim: 'Windows App'" "Gray"
-                    # Mo Microsoft Store
-                    Start-Process "ms-windows-store://pdp/?ProductId=9N1F85V9T8BN" -ErrorAction SilentlyContinue
+                    Log "Feature da bat nhung mstsc.exe van bi thieu. Can sua file he thong." "Red"
+                    Log "Chay Command Prompt bang quyen Administrator, sau do chay lan luot:" "Yellow"
+                    Log "DISM.exe /Online /Cleanup-Image /RestoreHealth" "Cyan"
+                    Log "sfc /scannow" "Cyan"
+                    Log "Sau do khoi dong lai Windows va chay lai script." "Yellow"
+                    Read-Host "Bam Enter de dong tunnel"
                 }
             }
             catch {
-                Log "Loi khi cai dat: $($_.Exception.Message)" "Red"
-                Log "Vui long cai dat thu cong tu Microsoft Store: tim 'Windows App'" "Gray"
+                Log "Loi khi khoi phuc: $($_.Exception.Message)" "Red"
+                Read-Host "Bam Enter de dong tunnel"
             }
             break
         }
